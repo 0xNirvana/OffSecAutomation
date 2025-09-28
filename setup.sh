@@ -35,6 +35,30 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to clean up problematic repositories
+cleanup_repositories() {
+    print_status "Cleaning up problematic repositories..."
+    
+    # Find and remove konghq repositories
+    if find /etc/apt -name "*.list" -exec grep -l "konghq" {} \; 2>/dev/null | head -1; then
+        print_status "Found konghq repositories, removing them..."
+        find /etc/apt -name "*.list" -exec grep -l "konghq" {} \; 2>/dev/null | while read file; do
+            print_status "Removing konghq entries from: $file"
+            sudo sed -i '/konghq/d' "$file"
+        done
+        print_success "konghq repositories removed"
+    else
+        print_success "No problematic konghq repositories found"
+    fi
+    
+    # Remove any other problematic repositories that might cause issues
+    print_status "Checking for other problematic repositories..."
+    if find /etc/apt -name "*.list" -exec grep -l "ubuntu" {} \; 2>/dev/null | head -1; then
+        print_warning "Found Ubuntu repositories on Kali system"
+        print_status "These may cause compatibility issues"
+    fi
+}
+
 # Function to disable IPv6
 disable_ipv6() {
     print_status "Disabling IPv6 to resolve connectivity issues..."
@@ -168,62 +192,118 @@ install_rustscan() {
             fi
         fi
         
-        # If package manager fails, download .deb file from GitHub
-        print_status "Package manager failed, downloading .deb from GitHub releases..."
+        # If package manager fails, download from bee-san fork (more actively maintained)
+        print_status "Package manager failed, downloading from bee-san fork..."
         
-        # Get latest release with better error handling
-        print_status "Fetching latest release information..."
-        LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+        # Detect system architecture
+        ARCH=$(uname -m)
+        case $ARCH in
+            x86_64)
+                ARCH_NAME="x86_64-unknown-linux-gnu"
+                ;;
+            aarch64|arm64)
+                ARCH_NAME="aarch64-unknown-linux-gnu"
+                ;;
+            armv7l)
+                ARCH_NAME="armv7-unknown-linux-gnueabihf"
+                ;;
+            *)
+                print_error "Unsupported architecture: $ARCH"
+                print_status "Manual installation:"
+                print_status "1. Visit: https://github.com/bee-san/RustScan/releases"
+                print_status "2. Download the appropriate file for your architecture"
+                return 1
+                ;;
+        esac
+        
+        print_status "Detected architecture: $ARCH ($ARCH_NAME)"
+        
+        # Get latest release from bee-san fork
+        print_status "Fetching latest release from bee-san fork..."
+        LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/bee-san/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
         
         if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
             print_warning "Could not get latest release from API, trying alternative method..."
             # Try to get release info from the releases page directly
-            LATEST_RELEASE=$(curl -s --connect-timeout 10 "https://github.com/RustScan/RustScan/releases" | grep -o 'tag/[^"]*' | head -1 | cut -d'/' -f2)
+            LATEST_RELEASE=$(curl -s --connect-timeout 10 "https://github.com/bee-san/RustScan/releases" | grep -o 'tag/[^"]*' | head -1 | cut -d'/' -f2)
             
             if [ -z "$LATEST_RELEASE" ]; then
                 print_error "Could not get latest release information"
                 print_status "Manual installation:"
-                print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
-                print_status "2. Download the .deb file for your architecture"
-                print_status "3. Run: sudo dpkg -i rustscan-*.deb"
+                print_status "1. Visit: https://github.com/bee-san/RustScan/releases"
+                print_status "2. Download the appropriate file for your architecture"
                 return 1
             fi
         fi
         
         print_status "Latest release: $LATEST_RELEASE"
         
-        # Try to download .deb file
-        DEB_FILE="rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.deb"
-        DOWNLOAD_URL="https://github.com/RustScan/RustScan/releases/download/${LATEST_RELEASE}/${DEB_FILE}"
-        
-        print_status "Downloading: $DOWNLOAD_URL"
-        if wget "$DOWNLOAD_URL" -O "/tmp/${DEB_FILE}" 2>/dev/null; then
-            print_success "Downloaded .deb file successfully"
+        # Try different file formats for the architecture
+        DOWNLOAD_SUCCESS=false
+        for file_format in "rustscan-${LATEST_RELEASE}-${ARCH_NAME}.deb" "rustscan-${LATEST_RELEASE}-${ARCH_NAME}.tar.gz" "rustscan-${LATEST_RELEASE}-${ARCH_NAME}"; do
+            DOWNLOAD_URL="https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/${file_format}"
+            print_status "Trying: $DOWNLOAD_URL"
             
-            # Install the .deb file
+            if wget "$DOWNLOAD_URL" -O "/tmp/${file_format}" 2>/dev/null; then
+                print_success "Downloaded: $file_format"
+                DOWNLOAD_SUCCESS=true
+                DOWNLOADED_FILE="/tmp/${file_format}"
+                break
+            fi
+        done
+        
+        if [ "$DOWNLOAD_SUCCESS" = false ]; then
+            print_error "Failed to download any file for architecture $ARCH_NAME"
+            print_status "Manual installation:"
+            print_status "1. Visit: https://github.com/bee-san/RustScan/releases"
+            print_status "2. Download the appropriate file for your architecture"
+            return 1
+        fi
+        
+        # Install based on file type
+        if [[ "$DOWNLOADED_FILE" == *.deb ]]; then
             print_status "Installing .deb package..."
-            if sudo dpkg -i "/tmp/${DEB_FILE}" 2>/dev/null; then
+            if sudo dpkg -i "$DOWNLOADED_FILE" 2>/dev/null; then
                 print_success "rustscan installed via .deb package"
-                rm -f "/tmp/${DEB_FILE}"
+                rm -f "$DOWNLOADED_FILE"
             else
                 print_warning "dpkg installation failed, trying to fix dependencies..."
                 sudo apt-get install -f -y
-                if sudo dpkg -i "/tmp/${DEB_FILE}" 2>/dev/null; then
+                if sudo dpkg -i "$DOWNLOADED_FILE" 2>/dev/null; then
                     print_success "rustscan installed via .deb package (after dependency fix)"
-                    rm -f "/tmp/${DEB_FILE}"
+                    rm -f "$DOWNLOADED_FILE"
                 else
                     print_error "Failed to install .deb package"
-                    rm -f "/tmp/${DEB_FILE}"
+                    rm -f "$DOWNLOADED_FILE"
                     return 1
                 fi
             fi
+        elif [[ "$DOWNLOADED_FILE" == *.tar.gz ]]; then
+            print_status "Extracting and installing binary..."
+            if tar -xzf "$DOWNLOADED_FILE" -C /tmp/ 2>/dev/null; then
+                # Find the rustscan binary
+                RUSTSCAN_BINARY=$(find /tmp -name "rustscan" -type f 2>/dev/null | head -1)
+                if [ ! -z "$RUSTSCAN_BINARY" ]; then
+                    sudo mv "$RUSTSCAN_BINARY" /usr/local/bin/rustscan
+                    sudo chmod +x /usr/local/bin/rustscan
+                    print_success "rustscan binary installed"
+                    rm -f "$DOWNLOADED_FILE"
+                else
+                    print_error "Could not find rustscan binary in archive"
+                    rm -f "$DOWNLOADED_FILE"
+                    return 1
+                fi
+            else
+                print_error "Failed to extract archive"
+                rm -f "$DOWNLOADED_FILE"
+                return 1
+            fi
         else
-            print_error "Failed to download .deb file"
-            print_status "Manual installation:"
-            print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
-            print_status "2. Download the .deb file for your architecture"
-            print_status "3. Run: sudo dpkg -i rustscan-*.deb"
-            return 1
+            # Assume it's a binary file
+            print_status "Installing binary..."
+            sudo mv "$DOWNLOADED_FILE" /usr/local/bin/rustscan
+            sudo chmod +x /usr/local/bin/rustscan
+            print_success "rustscan binary installed"
         fi
         
         # Verify installation
@@ -387,6 +467,9 @@ main() {
             exit 1
         fi
     fi
+    
+    # Clean up problematic repositories
+    cleanup_repositories
     
     # Disable IPv6 to resolve connectivity issues
     disable_ipv6
