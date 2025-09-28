@@ -2,7 +2,7 @@
 
 # OSCP Setup Script
 # This script configures a machine for OSCP preparation
-# Compatible with Kali Linux and Ubuntu
+# Designed specifically for Kali Linux
 
 set -e  # Exit on any error
 
@@ -37,26 +37,14 @@ command_exists() {
 
 # Function to update package lists
 update_packages() {
-    print_status "Updating package lists..."
-    if command_exists apt; then
-        # Try to update with error handling
-        if ! sudo apt update 2>/dev/null; then
-            print_warning "apt update failed, trying with IPv4 only..."
-            # Force IPv4 to avoid IPv6 connectivity issues
-            sudo apt update -o Acquire::ForceIPv4=true 2>/dev/null || {
-                print_warning "apt update still failed, continuing with installation..."
-            }
-        fi
-    elif command_exists apt-get; then
-        if ! sudo apt-get update 2>/dev/null; then
-            print_warning "apt-get update failed, trying with IPv4 only..."
-            sudo apt-get update -o Acquire::ForceIPv4=true 2>/dev/null || {
-                print_warning "apt-get update still failed, continuing with installation..."
-            }
-        fi
-    else
-        print_warning "No apt package manager found. Please install packages manually."
-        return 1
+    print_status "Updating Kali package lists..."
+    # Try to update with error handling
+    if ! sudo apt update 2>/dev/null; then
+        print_warning "apt update failed, trying with IPv4 only..."
+        # Force IPv4 to avoid IPv6 connectivity issues
+        sudo apt update -o Acquire::ForceIPv4=true 2>/dev/null || {
+            print_warning "apt update still failed, continuing with installation..."
+        }
     fi
 }
 
@@ -139,136 +127,71 @@ install_rustscan() {
     else
         print_status "Installing rustscan..."
         
-        # Try different installation methods
-        if command_exists cargo; then
-            print_status "Installing rustscan via cargo..."
-            cargo install rustscan
-        elif command_exists wget; then
-            print_status "Downloading rustscan binary..."
-            
-            # Try package manager first (most reliable)
-            if command_exists apt; then
-                print_status "Trying package manager installation first..."
-                if sudo apt install -y rustscan 2>/dev/null; then
-                    if command_exists rustscan; then
-                        print_success "rustscan installed via package manager"
-                        return 0
-                    fi
-                fi
+        # Try package manager first
+        print_status "Trying package manager installation..."
+        if sudo apt install -y rustscan 2>/dev/null; then
+            if command_exists rustscan; then
+                print_success "rustscan installed via package manager"
+                return 0
             fi
+        fi
+        
+        # If package manager fails, download .deb file from GitHub
+        print_status "Package manager failed, downloading .deb from GitHub releases..."
+        
+        # Get latest release
+        LATEST_RELEASE=$(curl -s https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+        
+        if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
+            print_error "Could not get latest release information"
+            print_status "Manual installation:"
+            print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
+            print_status "2. Download the .deb file for your architecture"
+            print_status "3. Run: sudo dpkg -i rustscan-*.deb"
+            return 1
+        fi
+        
+        print_status "Latest release: $LATEST_RELEASE"
+        
+        # Try to download .deb file
+        DEB_FILE="rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.deb"
+        DOWNLOAD_URL="https://github.com/RustScan/RustScan/releases/download/${LATEST_RELEASE}/${DEB_FILE}"
+        
+        print_status "Downloading: $DOWNLOAD_URL"
+        if wget "$DOWNLOAD_URL" -O "/tmp/${DEB_FILE}" 2>/dev/null; then
+            print_success "Downloaded .deb file successfully"
             
-            # Try to get latest release with better error handling
-            print_status "Attempting GitHub binary download..."
-            
-            # Try original repository first
-            LATEST_RELEASE=$(curl -s https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-            DOWNLOAD_SUCCESS=false
-            
-            if [ ! -z "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
-                print_status "Trying original repository: $LATEST_RELEASE"
-                # Try different possible file names
-                for filename in "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl"; do
-                    if wget "https://github.com/RustScan/RustScan/releases/download/${LATEST_RELEASE}/${filename}" -O /tmp/rustscan.tar.gz 2>/dev/null; then
-                        print_success "Downloaded from original repository"
-                        DOWNLOAD_SUCCESS=true
-                        break
-                    fi
-                done
-            fi
-            
-            # If original failed, try bee-san fork
-            if [ "$DOWNLOAD_SUCCESS" = false ]; then
-                print_warning "Original repository failed, trying bee-san fork..."
-                LATEST_RELEASE=$(curl -s https://api.github.com/repos/bee-san/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-                
-                if [ ! -z "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
-                    print_status "Trying bee-san fork: $LATEST_RELEASE"
-                    # Try different possible file names for bee-san fork
-                    for filename in "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl"; do
-                        if wget "https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/${filename}" -O /tmp/rustscan.tar.gz 2>/dev/null; then
-                            print_success "Downloaded from bee-san fork"
-                            DOWNLOAD_SUCCESS=true
-                            break
-                        fi
-                    done
-                fi
-            fi
-            
-            # If all downloads failed, try manual installation
-            if [ "$DOWNLOAD_SUCCESS" = false ]; then
-                print_error "All download methods failed"
-                print_status "Trying alternative installation methods..."
-                
-                # Try snap if available
-                if command_exists snap; then
-                    print_status "Trying snap installation..."
-                    if sudo snap install rustscan 2>/dev/null; then
-                        print_success "rustscan installed via snap"
-                        return 0
-                    fi
-                fi
-                
-                # Try installing Rust and using cargo
-                print_status "Attempting to install Rust and compile rustscan..."
-                if ! command_exists cargo; then
-                    print_status "Installing Rust..."
-                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-                    source "$HOME/.cargo/env"
-                fi
-                
-                if command_exists cargo; then
-                    print_status "Installing rustscan via cargo..."
-                    if cargo install rustscan; then
-                        print_success "rustscan installed via cargo"
-                        return 0
-                    fi
-                fi
-                
-                print_error "All installation methods failed"
-                print_status "Manual installation options:"
-                print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
-                print_status "2. Download the latest release manually"
-                print_status "3. Or install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-                print_status "4. Then install: cargo install rustscan"
-                return 1
-            fi
-            
-            # Extract and install if download was successful
-            if [ -f "/tmp/rustscan.tar.gz" ]; then
-                print_status "Extracting rustscan..."
-                if tar -xzf /tmp/rustscan.tar.gz -C /tmp/ 2>/dev/null; then
-                    # Find the rustscan binary
-                    RUSTSCAN_BINARY=$(find /tmp -name "rustscan" -type f 2>/dev/null | head -1)
-                    if [ ! -z "$RUSTSCAN_BINARY" ]; then
-                        sudo mv "$RUSTSCAN_BINARY" /usr/local/bin/rustscan
-                        sudo chmod +x /usr/local/bin/rustscan
-                        rm -f /tmp/rustscan.tar.gz
-                        print_success "rustscan binary installed"
-                    else
-                        print_error "Could not find rustscan binary in archive"
-                        return 1
-                    fi
+            # Install the .deb file
+            print_status "Installing .deb package..."
+            if sudo dpkg -i "/tmp/${DEB_FILE}" 2>/dev/null; then
+                print_success "rustscan installed via .deb package"
+                rm -f "/tmp/${DEB_FILE}"
+            else
+                print_warning "dpkg installation failed, trying to fix dependencies..."
+                sudo apt-get install -f -y
+                if sudo dpkg -i "/tmp/${DEB_FILE}" 2>/dev/null; then
+                    print_success "rustscan installed via .deb package (after dependency fix)"
+                    rm -f "/tmp/${DEB_FILE}"
                 else
-                    print_error "Failed to extract rustscan archive"
+                    print_error "Failed to install .deb package"
+                    rm -f "/tmp/${DEB_FILE}"
                     return 1
                 fi
             fi
         else
-            print_error "Cannot install rustscan. Please install cargo, wget, or use package manager."
-            print_status "Manual installation options:"
-            print_status "1. Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-            print_status "2. Install rustscan: cargo install rustscan"
-            print_status "3. Or install wget: sudo apt install wget"
+            print_error "Failed to download .deb file"
+            print_status "Manual installation:"
+            print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
+            print_status "2. Download the .deb file for your architecture"
+            print_status "3. Run: sudo dpkg -i rustscan-*.deb"
             return 1
         fi
         
+        # Verify installation
         if command_exists rustscan; then
             print_success "rustscan installed successfully"
         else
-            print_error "Failed to install rustscan"
-            print_status "You can try manual installation:"
-            print_status "1. Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-            print_status "2. Install rustscan: cargo install rustscan"
+            print_error "rustscan installation failed"
             return 1
         fi
     fi
@@ -281,14 +204,7 @@ install_nmap() {
         print_success "nmap is already installed"
     else
         print_status "Installing nmap..."
-        if command_exists apt; then
-            sudo apt install -y nmap
-        elif command_exists apt-get; then
-            sudo apt-get install -y nmap
-        else
-            print_error "Cannot install nmap. Please install manually."
-            return 1
-        fi
+        sudo apt install -y nmap
         
         if command_exists nmap; then
             print_success "nmap installed successfully"
@@ -323,14 +239,7 @@ install_terminator() {
     if command_exists terminator; then
         print_success "terminator is already installed"
     else
-        if command_exists apt; then
-            sudo apt install -y terminator
-        elif command_exists apt-get; then
-            sudo apt-get install -y terminator
-        else
-            print_error "Cannot install terminator. Please install manually."
-            return 1
-        fi
+        sudo apt install -y terminator
         
         if command_exists terminator; then
             print_success "terminator installed successfully"
@@ -448,9 +357,9 @@ main() {
     # Add tools directory to PATH
     add_tools_to_path
     
-    # Install required tools
-    install_rustscan
+    # Install required tools (nmap first as requested)
     install_nmap
+    install_rustscan
     install_terminator
     install_ligolo
     
@@ -459,13 +368,13 @@ main() {
     
     echo ""
     echo "=========================================="
-    print_success "OSCP setup completed successfully!"
+    print_success "OSCP setup completed successfully on Kali Linux!"
     echo "=========================================="
     echo ""
     echo "Installed tools:"
     echo "  - Tools directory: $HOME/tools"
-    echo "  - rustscan: $(which rustscan 2>/dev/null || echo 'Not found')"
     echo "  - nmap: $(which nmap 2>/dev/null || echo 'Not found')"
+    echo "  - rustscan: $(which rustscan 2>/dev/null || echo 'Not found')"
     echo "  - terminator: $(which terminator 2>/dev/null || echo 'Not found')"
     echo "  - ligolo-ng: $HOME/tools/ligolo/ligolo-ng"
     echo ""
