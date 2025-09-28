@@ -39,9 +39,21 @@ command_exists() {
 update_packages() {
     print_status "Updating package lists..."
     if command_exists apt; then
-        sudo apt update
+        # Try to update with error handling
+        if ! sudo apt update 2>/dev/null; then
+            print_warning "apt update failed, trying with IPv4 only..."
+            # Force IPv4 to avoid IPv6 connectivity issues
+            sudo apt update -o Acquire::ForceIPv4=true 2>/dev/null || {
+                print_warning "apt update still failed, continuing with installation..."
+            }
+        fi
     elif command_exists apt-get; then
-        sudo apt-get update
+        if ! sudo apt-get update 2>/dev/null; then
+            print_warning "apt-get update failed, trying with IPv4 only..."
+            sudo apt-get update -o Acquire::ForceIPv4=true 2>/dev/null || {
+                print_warning "apt-get update still failed, continuing with installation..."
+            }
+        fi
     else
         print_warning "No apt package manager found. Please install packages manually."
         return 1
@@ -134,53 +146,110 @@ install_rustscan() {
         elif command_exists wget; then
             print_status "Downloading rustscan binary..."
             
-            # Try to get latest release with better error handling
-            LATEST_RELEASE=$(curl -s https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+            # Try package manager first (most reliable)
+            if command_exists apt; then
+                print_status "Trying package manager installation first..."
+                if sudo apt install -y rustscan 2>/dev/null; then
+                    if command_exists rustscan; then
+                        print_success "rustscan installed via package manager"
+                        return 0
+                    fi
+                fi
+            fi
             
-            if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
-                print_warning "Could not get latest release info, trying alternative method..."
-                # Try the bee-san fork which is more actively maintained
+            # Try to get latest release with better error handling
+            print_status "Attempting GitHub binary download..."
+            
+            # Try original repository first
+            LATEST_RELEASE=$(curl -s https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+            DOWNLOAD_SUCCESS=false
+            
+            if [ ! -z "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
+                print_status "Trying original repository: $LATEST_RELEASE"
+                # Try different possible file names
+                for filename in "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl"; do
+                    if wget "https://github.com/RustScan/RustScan/releases/download/${LATEST_RELEASE}/${filename}" -O /tmp/rustscan.tar.gz 2>/dev/null; then
+                        print_success "Downloaded from original repository"
+                        DOWNLOAD_SUCCESS=true
+                        break
+                    fi
+                done
+            fi
+            
+            # If original failed, try bee-san fork
+            if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                print_warning "Original repository failed, trying bee-san fork..."
                 LATEST_RELEASE=$(curl -s https://api.github.com/repos/bee-san/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
                 
-                if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
-                    print_error "Could not determine latest release version"
-                    print_status "Trying to install from package manager instead..."
-                    
-                    # Try package manager installation
-                    if command_exists apt; then
-                        print_status "Installing rustscan via apt..."
-                        sudo apt update
-                        sudo apt install -y rustscan
-                    elif command_exists snap; then
-                        print_status "Installing rustscan via snap..."
-                        sudo snap install rustscan
+                if [ ! -z "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
+                    print_status "Trying bee-san fork: $LATEST_RELEASE"
+                    # Try different possible file names for bee-san fork
+                    for filename in "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl.tar.gz" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu" "rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-musl"; do
+                        if wget "https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/${filename}" -O /tmp/rustscan.tar.gz 2>/dev/null; then
+                            print_success "Downloaded from bee-san fork"
+                            DOWNLOAD_SUCCESS=true
+                            break
+                        fi
+                    done
+                fi
+            fi
+            
+            # If all downloads failed, try manual installation
+            if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                print_error "All download methods failed"
+                print_status "Trying alternative installation methods..."
+                
+                # Try snap if available
+                if command_exists snap; then
+                    print_status "Trying snap installation..."
+                    if sudo snap install rustscan 2>/dev/null; then
+                        print_success "rustscan installed via snap"
+                        return 0
+                    fi
+                fi
+                
+                # Try installing Rust and using cargo
+                print_status "Attempting to install Rust and compile rustscan..."
+                if ! command_exists cargo; then
+                    print_status "Installing Rust..."
+                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+                    source "$HOME/.cargo/env"
+                fi
+                
+                if command_exists cargo; then
+                    print_status "Installing rustscan via cargo..."
+                    if cargo install rustscan; then
+                        print_success "rustscan installed via cargo"
+                        return 0
+                    fi
+                fi
+                
+                print_error "All installation methods failed"
+                print_status "Manual installation options:"
+                print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
+                print_status "2. Download the latest release manually"
+                print_status "3. Or install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+                print_status "4. Then install: cargo install rustscan"
+                return 1
+            fi
+            
+            # Extract and install if download was successful
+            if [ -f "/tmp/rustscan.tar.gz" ]; then
+                print_status "Extracting rustscan..."
+                if tar -xzf /tmp/rustscan.tar.gz -C /tmp/ 2>/dev/null; then
+                    # Find the rustscan binary
+                    RUSTSCAN_BINARY=$(find /tmp -name "rustscan" -type f 2>/dev/null | head -1)
+                    if [ ! -z "$RUSTSCAN_BINARY" ]; then
+                        sudo mv "$RUSTSCAN_BINARY" /usr/local/bin/rustscan
+                        sudo chmod +x /usr/local/bin/rustscan
+                        rm -f /tmp/rustscan.tar.gz
+                        print_success "rustscan binary installed"
                     else
-                        print_error "Cannot install rustscan. Please install manually."
-                        print_status "Manual installation:"
-                        print_status "1. Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-                        print_status "2. Install rustscan: cargo install rustscan"
+                        print_error "Could not find rustscan binary in archive"
                         return 1
                     fi
                 else
-                    # Use bee-san fork
-                    print_status "Using bee-san fork of rustscan..."
-                    wget "https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/rustscan.tar.gz
-                fi
-            else
-                # Use original repository
-                print_status "Using original rustscan repository..."
-                wget "https://github.com/RustScan/RustScan/releases/download/${LATEST_RELEASE}/rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/rustscan.tar.gz
-            fi
-            
-            # If we got a release version, proceed with download
-            if [ ! -z "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
-                if [ -f "/tmp/rustscan.tar.gz" ]; then
-                    tar -xzf /tmp/rustscan.tar.gz -C /tmp/
-                    sudo mv /tmp/rustscan /usr/local/bin/
-                    sudo chmod +x /usr/local/bin/rustscan
-                    rm /tmp/rustscan.tar.gz
-                else
-                    print_error "Failed to download rustscan binary"
+                    print_error "Failed to extract rustscan archive"
                     return 1
                 fi
             fi
