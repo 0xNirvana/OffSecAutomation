@@ -35,6 +35,38 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to disable IPv6
+disable_ipv6() {
+    print_status "Disabling IPv6 to resolve connectivity issues..."
+    
+    # Check if IPv6 is already disabled
+    if [ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ] && [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)" = "1" ]; then
+        print_success "IPv6 is already disabled"
+        return 0
+    fi
+    
+    # Disable IPv6 temporarily
+    print_status "Temporarily disabling IPv6..."
+    sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1 2>/dev/null || true
+    sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
+    
+    # Disable IPv6 permanently
+    print_status "Disabling IPv6 permanently..."
+    if ! grep -q "net.ipv6.conf.all.disable_ipv6 = 1" /etc/sysctl.conf; then
+        echo "" | sudo tee -a /etc/sysctl.conf
+        echo "# Disable IPv6 - Added by OSCP setup script" | sudo tee -a /etc/sysctl.conf
+        echo "net.ipv6.conf.all.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf
+        echo "net.ipv6.conf.default.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf
+        echo "net.ipv6.conf.lo.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf
+        print_success "IPv6 disabled permanently"
+    else
+        print_success "IPv6 already disabled in sysctl.conf"
+    fi
+    
+    # Apply changes
+    sudo sysctl -p 2>/dev/null || true
+}
+
 # Function to update package lists
 update_packages() {
     print_status "Updating Kali package lists..."
@@ -139,16 +171,23 @@ install_rustscan() {
         # If package manager fails, download .deb file from GitHub
         print_status "Package manager failed, downloading .deb from GitHub releases..."
         
-        # Get latest release
-        LATEST_RELEASE=$(curl -s https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+        # Get latest release with better error handling
+        print_status "Fetching latest release information..."
+        LATEST_RELEASE=$(curl -s --connect-timeout 10 https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
         
         if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
-            print_error "Could not get latest release information"
-            print_status "Manual installation:"
-            print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
-            print_status "2. Download the .deb file for your architecture"
-            print_status "3. Run: sudo dpkg -i rustscan-*.deb"
-            return 1
+            print_warning "Could not get latest release from API, trying alternative method..."
+            # Try to get release info from the releases page directly
+            LATEST_RELEASE=$(curl -s --connect-timeout 10 "https://github.com/RustScan/RustScan/releases" | grep -o 'tag/[^"]*' | head -1 | cut -d'/' -f2)
+            
+            if [ -z "$LATEST_RELEASE" ]; then
+                print_error "Could not get latest release information"
+                print_status "Manual installation:"
+                print_status "1. Visit: https://github.com/RustScan/RustScan/releases"
+                print_status "2. Download the .deb file for your architecture"
+                print_status "3. Run: sudo dpkg -i rustscan-*.deb"
+                return 1
+            fi
         fi
         
         print_status "Latest release: $LATEST_RELEASE"
@@ -340,13 +379,17 @@ main() {
     
     # Check if running as root
     if [ "$EUID" -eq 0 ]; then
-        print_warning "Running as root. Some installations may not work properly."
+        print_warning "Running as root is not recommended. Please run as regular user."
+        print_status "The script will prompt for sudo when needed."
         read -p "Continue anyway? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             exit 1
         fi
     fi
+    
+    # Disable IPv6 to resolve connectivity issues
+    disable_ipv6
     
     # Update package lists
     update_packages
