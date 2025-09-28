@@ -407,7 +407,12 @@ install_ligolo() {
         print_success "ligolo-ng is already installed"
     else
         print_status "Installing ligolo-ng via package manager..."
-        if sudo apt install -y ligolo-ng; then
+        # Install and capture output to check for "already installed" case
+        INSTALL_OUTPUT=$(sudo apt install -y ligolo-ng 2>&1)
+        INSTALL_EXIT_CODE=$?
+        
+        # Check if installation was successful or if package was already installed
+        if [ $INSTALL_EXIT_CODE -eq 0 ] || echo "$INSTALL_OUTPUT" | grep -q "already the newest version"; then
             print_success "ligolo-ng installed successfully"
         else
             print_error "Failed to install ligolo-ng"
