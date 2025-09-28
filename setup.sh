@@ -402,37 +402,14 @@ install_terminator() {
 
 # Function to install ligolo
 install_ligolo() {
-    print_status "Installing ligolo..."
-    
-    # Create ligolo directory
-    LIGOLO_DIR="$HOME/tools/ligolo"
-    mkdir -p "$LIGOLO_DIR"
-    
-    # Check if ligolo-ng is already installed
-    if [ -f "$LIGOLO_DIR/ligolo-ng" ]; then
+    print_status "Installing ligolo-ng..."
+    if command_exists ligolo-ng; then
         print_success "ligolo-ng is already installed"
     else
-        print_status "Downloading ligolo-ng..."
+        print_status "Installing ligolo-ng via package manager..."
+        sudo apt install -y ligolo-ng
         
-        # Get latest release
-        LATEST_RELEASE=$(curl -s https://api.github.com/repos/nicocha30/ligolo-ng/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-        
-        if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
-            print_error "Failed to get latest release information"
-            print_status "Manual installation:"
-            print_status "1. Visit: https://github.com/nicocha30/ligolo-ng/releases"
-            print_status "2. Download the latest release manually"
-            return 1
-        fi
-        
-        # Download and extract
-        cd "$LIGOLO_DIR"
-        wget "https://github.com/nicocha30/ligolo-ng/releases/download/${LATEST_RELEASE}/ligolo-ng_${LATEST_RELEASE}_linux_amd64.tar.gz" -O ligolo.tar.gz
-        tar -xzf ligolo.tar.gz
-        chmod +x ligolo-ng
-        rm ligolo.tar.gz
-        
-        if [ -f "$LIGOLO_DIR/ligolo-ng" ]; then
+        if command_exists ligolo-ng; then
             print_success "ligolo-ng installed successfully"
         else
             print_error "Failed to install ligolo-ng"
@@ -447,13 +424,10 @@ install_ligolo() {
 # Ligolo Helper Script
 # Usage: ./ligolo.sh [proxy|agent]
 
-LIGOLO_DIR="$HOME/tools/ligolo"
-
 case "$1" in
     "proxy")
         echo "Starting Ligolo Proxy Server..."
-        cd "$LIGOLO_DIR"
-        ./ligolo-ng proxy -l 8080
+        ligolo-ng proxy -l 8080
         ;;
     "agent")
         if [ -z "$2" ]; then
@@ -462,8 +436,7 @@ case "$1" in
             exit 1
         fi
         echo "Starting Ligolo Agent connecting to $2..."
-        cd "$LIGOLO_DIR"
-        ./ligolo-ng agent -connect "$2:8080"
+        ligolo-ng agent -connect "$2:8080"
         ;;
     *)
         echo "Usage: $0 [proxy|agent]"
@@ -533,7 +506,7 @@ main() {
     echo "  - nmap: $(which nmap 2>/dev/null || echo 'Not found')"
     echo "  - rustscan: $(which rustscan 2>/dev/null || echo 'Not found')"
     echo "  - terminator: $(which terminator 2>/dev/null || echo 'Not found')"
-    echo "  - ligolo-ng: $HOME/tools/ligolo/ligolo-ng"
+    echo "  - ligolo-ng: $(which ligolo-ng 2>/dev/null || echo 'Not found')"
     echo ""
     echo "PATH Configuration:"
     echo "  - Tools directory added to PATH in shell config files"
