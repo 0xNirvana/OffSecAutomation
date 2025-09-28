@@ -195,17 +195,25 @@ install_rustscan() {
         # If package manager fails, download from bee-san fork (more actively maintained)
         print_status "Package manager failed, downloading from bee-san fork..."
         
-        # Detect system architecture
+        # Detect system architecture and map to actual release file names
         ARCH=$(uname -m)
         case $ARCH in
             x86_64)
-                ARCH_NAME="x86_64-unknown-linux-gnu"
+                ARCH_NAME="x86_64-linux"
+                DEB_FILE="rustscan.deb.zip"
+                TAR_FILE="x86_64-linux-rustscan.tar.gz.zip"
                 ;;
             aarch64|arm64)
-                ARCH_NAME="aarch64-unknown-linux-gnu"
+                ARCH_NAME="aarch64-linux"
+                DEB_FILE="rustscan.deb.zip"
+                TAR_FILE="aarch64-linux-rustscan.zip"
                 ;;
             armv7l)
-                ARCH_NAME="armv7-unknown-linux-gnueabihf"
+                print_error "ARMv7 not supported in current releases"
+                print_status "Manual installation:"
+                print_status "1. Visit: https://github.com/bee-san/RustScan/releases"
+                print_status "2. Download the appropriate file for your architecture"
+                return 1
                 ;;
             *)
                 print_error "Unsupported architecture: $ARCH"
@@ -238,19 +246,30 @@ install_rustscan() {
         
         print_status "Latest release: $LATEST_RELEASE"
         
-        # Try different file formats for the architecture
+        # Try different file formats for the architecture (using actual release file names)
         DOWNLOAD_SUCCESS=false
-        for file_format in "rustscan-${LATEST_RELEASE}-${ARCH_NAME}.deb" "rustscan-${LATEST_RELEASE}-${ARCH_NAME}.tar.gz" "rustscan-${LATEST_RELEASE}-${ARCH_NAME}"; do
-            DOWNLOAD_URL="https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/${file_format}"
-            print_status "Trying: $DOWNLOAD_URL"
+        
+        # Try .deb file first (works for both x86_64 and aarch64)
+        print_status "Trying .deb package..."
+        DOWNLOAD_URL="https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/${DEB_FILE}"
+        print_status "Downloading: $DOWNLOAD_URL"
+        
+        if wget "$DOWNLOAD_URL" -O "/tmp/${DEB_FILE}" 2>/dev/null; then
+            print_success "Downloaded: $DEB_FILE"
+            DOWNLOAD_SUCCESS=true
+            DOWNLOADED_FILE="/tmp/${DEB_FILE}"
+        else
+            # Try architecture-specific tar.gz file
+            print_status "Trying architecture-specific tar.gz..."
+            DOWNLOAD_URL="https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/${TAR_FILE}"
+            print_status "Downloading: $DOWNLOAD_URL"
             
-            if wget "$DOWNLOAD_URL" -O "/tmp/${file_format}" 2>/dev/null; then
-                print_success "Downloaded: $file_format"
+            if wget "$DOWNLOAD_URL" -O "/tmp/${TAR_FILE}" 2>/dev/null; then
+                print_success "Downloaded: $TAR_FILE"
                 DOWNLOAD_SUCCESS=true
-                DOWNLOADED_FILE="/tmp/${file_format}"
-                break
+                DOWNLOADED_FILE="/tmp/${TAR_FILE}"
             fi
-        done
+        fi
         
         if [ "$DOWNLOAD_SUCCESS" = false ]; then
             print_error "Failed to download any file for architecture $ARCH_NAME"
@@ -261,26 +280,40 @@ install_rustscan() {
         fi
         
         # Install based on file type
-        if [[ "$DOWNLOADED_FILE" == *.deb ]]; then
-            print_status "Installing .deb package..."
-            if sudo dpkg -i "$DOWNLOADED_FILE" 2>/dev/null; then
-                print_success "rustscan installed via .deb package"
-                rm -f "$DOWNLOADED_FILE"
-            else
-                print_warning "dpkg installation failed, trying to fix dependencies..."
-                sudo apt-get install -f -y
-                if sudo dpkg -i "$DOWNLOADED_FILE" 2>/dev/null; then
-                    print_success "rustscan installed via .deb package (after dependency fix)"
-                    rm -f "$DOWNLOADED_FILE"
+        if [[ "$DOWNLOADED_FILE" == *.deb.zip ]]; then
+            print_status "Extracting and installing .deb package..."
+            if unzip -q "$DOWNLOADED_FILE" -d /tmp/ 2>/dev/null; then
+                # Find the .deb file inside the zip
+                DEB_INNER=$(find /tmp -name "*.deb" 2>/dev/null | head -1)
+                if [ ! -z "$DEB_INNER" ]; then
+                    if sudo dpkg -i "$DEB_INNER" 2>/dev/null; then
+                        print_success "rustscan installed via .deb package"
+                        rm -f "$DOWNLOADED_FILE" "$DEB_INNER"
+                    else
+                        print_warning "dpkg installation failed, trying to fix dependencies..."
+                        sudo apt-get install -f -y
+                        if sudo dpkg -i "$DEB_INNER" 2>/dev/null; then
+                            print_success "rustscan installed via .deb package (after dependency fix)"
+                            rm -f "$DOWNLOADED_FILE" "$DEB_INNER"
+                        else
+                            print_error "Failed to install .deb package"
+                            rm -f "$DOWNLOADED_FILE" "$DEB_INNER"
+                            return 1
+                        fi
+                    fi
                 else
-                    print_error "Failed to install .deb package"
+                    print_error "Could not find .deb file in zip archive"
                     rm -f "$DOWNLOADED_FILE"
                     return 1
                 fi
+            else
+                print_error "Failed to extract zip archive"
+                rm -f "$DOWNLOADED_FILE"
+                return 1
             fi
-        elif [[ "$DOWNLOADED_FILE" == *.tar.gz ]]; then
+        elif [[ "$DOWNLOADED_FILE" == *.zip ]]; then
             print_status "Extracting and installing binary..."
-            if tar -xzf "$DOWNLOADED_FILE" -C /tmp/ 2>/dev/null; then
+            if unzip -q "$DOWNLOADED_FILE" -d /tmp/ 2>/dev/null; then
                 # Find the rustscan binary
                 RUSTSCAN_BINARY=$(find /tmp -name "rustscan" -type f 2>/dev/null | head -1)
                 if [ ! -z "$RUSTSCAN_BINARY" ]; then
@@ -294,16 +327,14 @@ install_rustscan() {
                     return 1
                 fi
             else
-                print_error "Failed to extract archive"
+                print_error "Failed to extract zip archive"
                 rm -f "$DOWNLOADED_FILE"
                 return 1
             fi
         else
-            # Assume it's a binary file
-            print_status "Installing binary..."
-            sudo mv "$DOWNLOADED_FILE" /usr/local/bin/rustscan
-            sudo chmod +x /usr/local/bin/rustscan
-            print_success "rustscan binary installed"
+            print_error "Unknown file format: $DOWNLOADED_FILE"
+            rm -f "$DOWNLOADED_FILE"
+            return 1
         fi
         
         # Verify installation
