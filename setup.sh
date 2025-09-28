@@ -400,6 +400,30 @@ install_terminator() {
     fi
 }
 
+# Function to configure terminator
+configure_terminator() {
+    print_status "Configuring terminator..."
+    
+    # Create terminator config directory
+    mkdir -p "$HOME/.config/terminator"
+    
+    # Get the directory where this script is located
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Copy terminator config
+    if [ -f "$SCRIPT_DIR/configs/terminator_config" ]; then
+        cp "$SCRIPT_DIR/configs/terminator_config" "$HOME/.config/terminator/config"
+        print_success "Terminator configured with OSCP layout"
+        print_status "Terminator features:"
+        print_status "  - 4-panel split layout"
+        print_status "  - Dark transparent theme"
+        print_status "  - Professional color scheme"
+        print_status "  - Optimized for penetration testing workflow"
+    else
+        print_warning "Terminator config file not found, skipping configuration"
+    fi
+}
+
 # Function to install ligolo
 install_ligolo() {
     print_status "Installing ligolo-ng..."
@@ -494,6 +518,7 @@ main() {
     install_nmap
     install_rustscan
     install_terminator
+    configure_terminator
     install_ligolo
     
     # Create scanner script
@@ -508,7 +533,7 @@ main() {
     echo "  - Tools directory: $HOME/tools"
     echo "  - nmap: $(which nmap 2>/dev/null || echo 'Not found')"
     echo "  - rustscan: $(which rustscan 2>/dev/null || echo 'Not found')"
-    echo "  - terminator: $(which terminator 2>/dev/null || echo 'Not found')"
+    echo "  - terminator: $(which terminator 2>/dev/null || echo 'Not found') (configured with OSCP layout)"
     echo "  - ligolo-ng: $(which ligolo-ng 2>/dev/null || echo 'Not found')"
     echo ""
     echo "PATH Configuration:"
