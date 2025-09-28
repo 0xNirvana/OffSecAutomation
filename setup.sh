@@ -133,15 +133,63 @@ install_rustscan() {
             cargo install rustscan
         elif command_exists wget; then
             print_status "Downloading rustscan binary..."
-            # Get latest release
+            
+            # Try to get latest release with better error handling
             LATEST_RELEASE=$(curl -s https://api.github.com/repos/RustScan/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
-            wget "https://github.com/RustScan/RustScan/releases/download/${LATEST_RELEASE}/rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/rustscan.tar.gz
-            tar -xzf /tmp/rustscan.tar.gz -C /tmp/
-            sudo mv /tmp/rustscan /usr/local/bin/
-            sudo chmod +x /usr/local/bin/rustscan
-            rm /tmp/rustscan.tar.gz
+            
+            if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
+                print_warning "Could not get latest release info, trying alternative method..."
+                # Try the bee-san fork which is more actively maintained
+                LATEST_RELEASE=$(curl -s https://api.github.com/repos/bee-san/RustScan/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+                
+                if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
+                    print_error "Could not determine latest release version"
+                    print_status "Trying to install from package manager instead..."
+                    
+                    # Try package manager installation
+                    if command_exists apt; then
+                        print_status "Installing rustscan via apt..."
+                        sudo apt update
+                        sudo apt install -y rustscan
+                    elif command_exists snap; then
+                        print_status "Installing rustscan via snap..."
+                        sudo snap install rustscan
+                    else
+                        print_error "Cannot install rustscan. Please install manually."
+                        print_status "Manual installation:"
+                        print_status "1. Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+                        print_status "2. Install rustscan: cargo install rustscan"
+                        return 1
+                    fi
+                else
+                    # Use bee-san fork
+                    print_status "Using bee-san fork of rustscan..."
+                    wget "https://github.com/bee-san/RustScan/releases/download/${LATEST_RELEASE}/rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/rustscan.tar.gz
+                fi
+            else
+                # Use original repository
+                print_status "Using original rustscan repository..."
+                wget "https://github.com/RustScan/RustScan/releases/download/${LATEST_RELEASE}/rustscan-${LATEST_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" -O /tmp/rustscan.tar.gz
+            fi
+            
+            # If we got a release version, proceed with download
+            if [ ! -z "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
+                if [ -f "/tmp/rustscan.tar.gz" ]; then
+                    tar -xzf /tmp/rustscan.tar.gz -C /tmp/
+                    sudo mv /tmp/rustscan /usr/local/bin/
+                    sudo chmod +x /usr/local/bin/rustscan
+                    rm /tmp/rustscan.tar.gz
+                else
+                    print_error "Failed to download rustscan binary"
+                    return 1
+                fi
+            fi
         else
-            print_error "Cannot install rustscan. Please install cargo or wget first."
+            print_error "Cannot install rustscan. Please install cargo, wget, or use package manager."
+            print_status "Manual installation options:"
+            print_status "1. Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+            print_status "2. Install rustscan: cargo install rustscan"
+            print_status "3. Or install wget: sudo apt install wget"
             return 1
         fi
         
@@ -149,6 +197,9 @@ install_rustscan() {
             print_success "rustscan installed successfully"
         else
             print_error "Failed to install rustscan"
+            print_status "You can try manual installation:"
+            print_status "1. Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+            print_status "2. Install rustscan: cargo install rustscan"
             return 1
         fi
     fi
@@ -238,8 +289,11 @@ install_ligolo() {
         # Get latest release
         LATEST_RELEASE=$(curl -s https://api.github.com/repos/nicocha30/ligolo-ng/releases/latest | grep "tag_name" | cut -d '"' -f 4)
         
-        if [ -z "$LIGOLO_RELEASE" ]; then
+        if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
             print_error "Failed to get latest release information"
+            print_status "Manual installation:"
+            print_status "1. Visit: https://github.com/nicocha30/ligolo-ng/releases"
+            print_status "2. Download the latest release manually"
             return 1
         fi
         
