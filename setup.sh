@@ -407,9 +407,7 @@ install_ligolo() {
         print_success "ligolo-ng is already installed"
     else
         print_status "Installing ligolo-ng via package manager..."
-        sudo apt install -y ligolo-ng
-        
-        if command_exists ligolo-ng; then
+        if sudo apt install -y ligolo-ng; then
             print_success "ligolo-ng installed successfully"
         else
             print_error "Failed to install ligolo-ng"
