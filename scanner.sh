@@ -23,11 +23,17 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
 # Function to show usage
 show_usage() {
     echo "Usage: $0 <target_ip> [output_directory]"
     echo "Example: $0 192.168.1.100"
-    echo "Example: $0 192.168.1.100 /path/to/results"
+    echo "Example: $0 192.168.1.100 ./my_scan_results"
+    echo ""
+    echo "Note: Results are saved in the current directory by default"
     exit 1
 }
 
@@ -38,7 +44,7 @@ if [ $# -lt 1 ]; then
 fi
 
 TARGET=$1
-OUTPUT_DIR=${2:-"$HOME/tools/scan_results"}
+OUTPUT_DIR=${2:-"./scan_results"}
 
 # Validate IP address format
 if ! [[ $TARGET =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
@@ -54,6 +60,7 @@ mkdir -p "$SCAN_DIR"
 
 print_status "Starting comprehensive scan of $TARGET"
 print_status "Results will be saved to: $SCAN_DIR"
+print_status "Current working directory: $(pwd)"
 
 # Step 1: Fast port discovery with rustscan
 print_status "Step 1: Fast port discovery with rustscan..."
@@ -62,9 +69,17 @@ rustscan -a "$TARGET" -- -sV -oA "$SCAN_DIR/rustscan_initial" 2>/dev/null || {
     nmap -sS -O -F "$TARGET" -oA "$SCAN_DIR/nmap_initial"
 }
 
+# Debug: Show what files were created
+print_status "Files created in scan directory:"
+ls -la "$SCAN_DIR" 2>/dev/null || print_warning "Could not list scan directory"
+
 # Extract open ports from rustscan results
-if [ -f "$SCAN_DIR/rustscan_initial.nmap" ]; then
-    PORTS=$(grep -o '[0-9]*/open' "$SCAN_DIR/rustscan_initial.nmap" | cut -d'/' -f1 | tr '\n' ',' | sed 's/,$//')
+# Rustscan creates files with the target IP in the name, so we need to find the actual file
+RUSTSCAN_NMAP_FILE=$(find "$SCAN_DIR" -name "*.nmap" -type f | head -1)
+
+if [ ! -z "$RUSTSCAN_NMAP_FILE" ] && [ -f "$RUSTSCAN_NMAP_FILE" ]; then
+    print_status "Extracting ports from: $RUSTSCAN_NMAP_FILE"
+    PORTS=$(grep -o '[0-9]*/open' "$RUSTSCAN_NMAP_FILE" | cut -d'/' -f1 | tr '\n' ',' | sed 's/,$//')
 else
     # Fallback: use nmap to discover ports
     print_status "Using nmap for port discovery..."
