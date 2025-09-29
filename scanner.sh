@@ -68,7 +68,7 @@ if rustscan -a "$TARGET" --ulimit 5000 --quiet -- -sV -oA "$SCAN_DIR/rustscan_in
     print_success "Rustscan completed successfully"
 else
     print_warning "Rustscan failed, falling back to nmap for port discovery..."
-    nmap -sS -O -F "$TARGET" -oA "$SCAN_DIR/nmap_initial"
+    sudo nmap -sS -O -F "$TARGET" -oA "$SCAN_DIR/nmap_initial"
 fi
 
 
@@ -82,7 +82,7 @@ if [ ! -z "$RUSTSCAN_NMAP_FILE" ] && [ -f "$RUSTSCAN_NMAP_FILE" ]; then
 else
     # Fallback: use nmap to discover ports
     print_status "Using nmap for port discovery..."
-    nmap -sS -O -F "$TARGET" -oA "$SCAN_DIR/nmap_initial"
+    sudo nmap -sS -O -F "$TARGET" -oA "$SCAN_DIR/nmap_initial"
     PORTS=$(grep -o '[0-9]*/open' "$SCAN_DIR/nmap_initial.nmap" | cut -d'/' -f1 | tr '\n' ',' | sed 's/,$//')
 fi
 
@@ -98,11 +98,11 @@ print_status "Step 2: Running comprehensive nmap scan on ports: $PORTS"
 print_status "This includes: service detection, OS detection, vulnerability scanning, and script enumeration"
 
 # Single comprehensive nmap scan with all necessary flags
-nmap -sV -sC -O -A --script vuln,safe,default,discovery,version -p "$PORTS" "$TARGET" -oA "$SCAN_DIR/nmap_comprehensive"
+sudo nmap -sV -sC -O -A --script vuln,safe,default,discovery,version -p "$PORTS" "$TARGET" -oA "$SCAN_DIR/nmap_comprehensive"
 
 # UDP scan on common ports (separate as it's a different scan type)
 print_status "Running UDP scan on common ports..."
-nmap -sU --top-ports 1000 "$TARGET" -oA "$SCAN_DIR/nmap_udp"
+sudo nmap -sU --top-ports 1000 "$TARGET" -oA "$SCAN_DIR/nmap_udp"
 
 # Generate summary report
 print_status "Generating summary report..."
