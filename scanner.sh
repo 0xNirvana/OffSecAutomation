@@ -64,14 +64,13 @@ print_status "Current working directory: $(pwd)"
 
 # Step 1: Fast port discovery with rustscan
 print_status "Step 1: Fast port discovery with rustscan..."
-rustscan -a "$TARGET" -- -sV -oA "$SCAN_DIR/rustscan_initial" 2>/dev/null || {
-    print_error "Rustscan failed, falling back to nmap for port discovery"
+if rustscan -a "$TARGET" -- -sV -oA "$SCAN_DIR/rustscan_initial" 2>/dev/null; then
+    print_success "Rustscan completed successfully"
+else
+    print_warning "Rustscan failed, falling back to nmap for port discovery..."
     nmap -sS -O -F "$TARGET" -oA "$SCAN_DIR/nmap_initial"
-}
+fi
 
-# Debug: Show what files were created
-print_status "Files created in scan directory:"
-ls -la "$SCAN_DIR" 2>/dev/null || print_warning "Could not list scan directory"
 
 # Extract open ports from rustscan results
 # Rustscan creates files with the target IP in the name, so we need to find the actual file
