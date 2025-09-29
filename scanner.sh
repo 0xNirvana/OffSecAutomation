@@ -64,21 +64,22 @@ print_status "Current working directory: $(pwd)"
 
 # Step 1: Fast port discovery with rustscan
 print_status "Step 1: Fast port discovery with rustscan..."
-if rustscan -a "$TARGET" --ulimit 5000 --no-banner -- -oA "$SCAN_DIR/rustscan_initial" >/dev/null 2>&1; then
+if rustscan -a "$TARGET" -p- --no-banner --ulimit 10000 > "$SCAN_DIR/rustscan_ports.txt" 2>/dev/null; then
     print_success "Rustscan completed successfully"
 else
     print_warning "Rustscan failed, falling back to nmap for port discovery..."
     sudo nmap -sS -O -F "$TARGET" -oA "$SCAN_DIR/nmap_initial"
 fi
 
+# Debug: Check what files were created
+print_status "Files created in scan directory:"
+ls -la "$SCAN_DIR" 2>/dev/null || print_warning "Could not list scan directory"
+
 
 # Extract open ports from rustscan results
-# Rustscan creates files with the target IP in the name, so we need to find the actual file
-RUSTSCAN_NMAP_FILE=$(find "$SCAN_DIR" -name "*.nmap" -type f | head -1)
-
-if [ ! -z "$RUSTSCAN_NMAP_FILE" ] && [ -f "$RUSTSCAN_NMAP_FILE" ]; then
-    print_status "Extracting ports from: $RUSTSCAN_NMAP_FILE"
-    PORTS=$(grep -o '[0-9]*/open' "$RUSTSCAN_NMAP_FILE" | cut -d'/' -f1 | tr '\n' ',' | sed 's/,$//')
+if [ -f "$SCAN_DIR/rustscan_ports.txt" ]; then
+    print_status "Extracting ports from rustscan output..."
+    PORTS=$(grep "Open" "$SCAN_DIR/rustscan_ports.txt" | grep -o '[0-9]*' | tr '\n' ',' | sed 's/,$//')
 else
     # Fallback: use nmap to discover ports
     print_status "Using nmap for port discovery..."
