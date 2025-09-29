@@ -64,7 +64,7 @@ print_status "Current working directory: $(pwd)"
 
 # Step 1: Fast port discovery with rustscan
 print_status "Step 1: Fast port discovery with rustscan..."
-if rustscan -a "$TARGET" --ulimit 5000 -- -sV -oA "$SCAN_DIR/rustscan_initial"; then
+if rustscan -a "$TARGET" --ulimit 5000 --no-banner -- -sV -oA "$SCAN_DIR/rustscan_initial"; then
     print_success "Rustscan completed successfully"
 else
     print_warning "Rustscan failed, falling back to nmap for port discovery..."
