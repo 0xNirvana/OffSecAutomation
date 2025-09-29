@@ -64,7 +64,7 @@ print_status "Current working directory: $(pwd)"
 
 # Step 1: Fast port discovery with rustscan
 print_status "Step 1: Fast port discovery with rustscan..."
-if rustscan -a "$TARGET" -- -sV -oA "$SCAN_DIR/rustscan_initial" 2>/dev/null; then
+if rustscan -a "$TARGET" --ulimit 5000 --quiet -- -sV -oA "$SCAN_DIR/rustscan_initial" 2>/dev/null; then
     print_success "Rustscan completed successfully"
 else
     print_warning "Rustscan failed, falling back to nmap for port discovery..."
@@ -94,25 +94,13 @@ fi
 print_success "Found open ports: $PORTS"
 
 # Step 2: Comprehensive nmap scan on discovered ports
-print_status "Step 2: Comprehensive nmap scan on ports: $PORTS"
+print_status "Step 2: Running comprehensive nmap scan on ports: $PORTS"
+print_status "This includes: service detection, OS detection, vulnerability scanning, and script enumeration"
 
-# Basic scan with service detection
-print_status "Running service detection scan..."
-nmap -sV -sC -O -p "$PORTS" "$TARGET" -oA "$SCAN_DIR/nmap_services"
+# Single comprehensive nmap scan with all necessary flags
+nmap -sV -sC -O -A --script vuln,safe,default,discovery,version -p "$PORTS" "$TARGET" -oA "$SCAN_DIR/nmap_comprehensive"
 
-# Aggressive scan
-print_status "Running aggressive scan..."
-nmap -A -p "$PORTS" "$TARGET" -oA "$SCAN_DIR/nmap_aggressive"
-
-# Vulnerability scan
-print_status "Running vulnerability scan..."
-nmap --script vuln -p "$PORTS" "$TARGET" -oA "$SCAN_DIR/nmap_vuln"
-
-# Script scan for common vulnerabilities
-print_status "Running script scan..."
-nmap --script safe,default,discovery,version -p "$PORTS" "$TARGET" -oA "$SCAN_DIR/nmap_scripts"
-
-# UDP scan on common ports (if no firewall detected)
+# UDP scan on common ports (separate as it's a different scan type)
 print_status "Running UDP scan on common ports..."
 nmap -sU --top-ports 1000 "$TARGET" -oA "$SCAN_DIR/nmap_udp"
 
@@ -127,10 +115,7 @@ Open Ports: $PORTS
 
 Files Generated:
 - rustscan_initial.* (Initial port discovery)
-- nmap_services.* (Service detection)
-- nmap_aggressive.* (Aggressive scan)
-- nmap_vuln.* (Vulnerability scan)
-- nmap_scripts.* (Script scan)
+- nmap_comprehensive.* (Comprehensive scan with all flags)
 - nmap_udp.* (UDP scan)
 
 Formats available: .nmap, .xml, .gnmap
@@ -148,6 +133,6 @@ echo "Open Ports: $PORTS"
 echo "Results Directory: $SCAN_DIR"
 echo ""
 echo "To view results:"
-echo "  - Text format: cat $SCAN_DIR/nmap_services.nmap"
-echo "  - XML format: $SCAN_DIR/nmap_services.xml"
-echo "  - Grepable: $SCAN_DIR/nmap_services.gnmap"
+echo "  - Text format: cat $SCAN_DIR/nmap_comprehensive.nmap"
+echo "  - XML format: $SCAN_DIR/nmap_comprehensive.xml"
+echo "  - Grepable: $SCAN_DIR/nmap_comprehensive.gnmap"
