@@ -26,22 +26,29 @@ check_tools() {
 
 # --- Main Script Execution ---
 
-# 1. Check for target argument
+# 1. Check if running as root or with sudo, if not, re-run with sudo
+if [ "$EUID" -ne 0 ]; then
+    echo "[+] This script requires root privileges. Re-running with sudo..."
+    sudo "$0" "$@"
+    exit $?
+fi
+
+# 2. Check for target argument
 if [ -z "$TARGET" ]; then
-    echo "Usage: $0 <target_ip_or_hostname>"
-    echo "Example: $0 192.168.1.1"
+    echo "Usage: sudo $0 <target_ip_or_hostname>"
+    echo "Example: sudo $0 192.168.1.1"
     exit 1
 fi
 
-# 2. Check for dependencies
+# 3. Check for dependencies
 check_tools
 
-# 3. Create output directory
+# 4. Create output directory
 echo "[+] Creating output directory: $OUTPUT_DIR"
 # Note: If this directory already exists, new scan results will overwrite previous ones.
 mkdir -p "$OUTPUT_DIR"
 
-# 4. Run RustScan for fast port discovery
+# 5. Run RustScan for fast port discovery
 echo "[+] Starting RustScan on all 65535 ports for $TARGET..."
 # Run rustscan, disabling its internal nmap feature (-g/--execute) and piping the output
 # to tee to save it immediately, and to grep for the port list.
@@ -55,7 +62,7 @@ RUSTSCAN_OUTPUT=$(rustscan -a "$TARGET" \
              --scripts none \
              -- -oG "$RUSTSCAN_FILE.grep" 2>&1 | tee /dev/tty)
 
-# 5. Extract ports for Nmap
+# 6. Extract ports for Nmap
 # Use greppable format for simple port extraction
 if [ -f "${RUSTSCAN_FILE}.grep" ]; then
     # Extract from greppable format - much simpler!
@@ -64,6 +71,9 @@ else
     # Fallback to parsing console output (remove ANSI codes first)
     PORTS=$(echo "$RUSTSCAN_OUTPUT" | sed 's/\x1b\[[0-9;]*m//g' | grep -o '\[.*\]' | tr -d '[]' | tr -d ' ')
 fi
+
+# Clean up PORTS variable - remove any non-numeric and non-comma characters
+PORTS=$(echo "$PORTS" | tr -cd '0-9,')
 
 
 if [ -z "$PORTS" ]; then
@@ -74,7 +84,7 @@ fi
 echo "[+] RustScan found the following open ports: $PORTS"
 echo "---------------------------------------------------------"
 
-# 6. Run Nmap for detailed scanning
+# 7. Run Nmap for detailed scanning
 echo "[+] Starting Nmap detailed scan on ports: $PORTS"
 echo "[+] Results will be saved to: $NMAP_FILE"
 
@@ -82,9 +92,9 @@ echo "[+] Results will be saved to: $NMAP_FILE"
 # -sV: version detection
 # -p : specify ports
 # -oN: save normal output to file
-nmap -sC -sV -p "$PORTS" "$TARGET" -oN "$NMAP_FILE"
+nmap -sC -sV -p "$PORTS" -O "$TARGET" -oN "$NMAP_FILE"
 
-# 7. Final Summary
+# 8. Final Summary
 echo "---------------------------------------------------------"
 echo "[*] Scan complete."
 echo "[*] RustScan results (Initial Port List) saved to: $RUSTSCAN_FILE"
